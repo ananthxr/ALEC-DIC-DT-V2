@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//y/ALEC DIC DT - V1/Assets/Scripts/UI/**)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
