@@ -24,6 +24,9 @@ public class SlidingPanelController : MonoBehaviour
     [Header("MasterUI Integration")]
     [SerializeField] private MasterUI masterUI;
 
+    [Header("Alarm Data Integration")]
+    [SerializeField] private MasterAlarm masterAlarm;
+
     // State management
     private bool isPanelVisible = false;
     private bool isAnimating = false;
@@ -33,10 +36,29 @@ public class SlidingPanelController : MonoBehaviour
     // List to keep track of spawned items
     private List<GameObject> spawnedItems = new List<GameObject>();
 
+    // Current alarm data
+    private List<AlarmData> currentAlarmData = new List<AlarmData>();
+
     private void Awake()
     {
         InitializePanel();
-        SpawnAlarmItems();
+
+        // Subscribe to MasterAlarm alarm updates
+        if (masterAlarm != null)
+        {
+            masterAlarm.OnAlarmsReceived += OnAlarmsReceived;
+        }
+        else
+        {
+            Debug.LogWarning("[SlidingPanelController] MasterAlarm reference is not assigned!");
+        }
+    }
+
+    private void OnAlarmsReceived(List<AlarmData> alarms)
+    {
+        Debug.Log($"[SlidingPanelController] Received {alarms.Count} alarms from MasterAlarm");
+        currentAlarmData = alarms;
+        UpdateAlarmDisplay();
     }
 
     private void InitializePanel()
@@ -155,22 +177,39 @@ public class SlidingPanelController : MonoBehaviour
         }
     }
 
-    // Spawn alarm item prefabs in the scroll view
-    private void SpawnAlarmItems()
+    // Update alarm display with real data
+    private void UpdateAlarmDisplay()
     {
-        if (alarmItemPrefab == null || scrollViewContent == null) return;
+        if (alarmItemPrefab == null || scrollViewContent == null)
+        {
+            Debug.LogWarning("[SlidingPanelController] AlarmItemPrefab or ScrollViewContent is not assigned!");
+            return;
+        }
 
-        // Clear any existing items first
+        // Clear existing items
         ClearAlarmItems();
 
-        // Spawn the specified number of items
-        for (int i = 0; i < numberOfItemsToSpawn; i++)
+        // Spawn items based on actual alarm data
+        int alarmsToDisplay = Mathf.Min(currentAlarmData.Count, numberOfItemsToSpawn);
+
+        for (int i = 0; i < alarmsToDisplay; i++)
         {
             GameObject item = Instantiate(alarmItemPrefab, scrollViewContent, false);
             spawnedItems.Add(item);
+
+            // Get the AlarmItemUI component and set the data
+            AlarmItemUI alarmUI = item.GetComponent<AlarmItemUI>();
+            if (alarmUI != null)
+            {
+                alarmUI.SetAlarmData(currentAlarmData[i]);
+            }
+            else
+            {
+                Debug.LogWarning($"[SlidingPanelController] AlarmItemUI component not found on prefab instance {i}");
+            }
         }
 
-        Debug.Log($"[SlidingPanelController] Spawned {numberOfItemsToSpawn} alarm items");
+        Debug.Log($"[SlidingPanelController] Displayed {alarmsToDisplay} alarm items with real data");
     }
 
     // Clear all spawned items
@@ -189,11 +228,17 @@ public class SlidingPanelController : MonoBehaviour
     // Public method to re-spawn items (useful if you want to refresh the list)
     public void RefreshAlarmItems()
     {
-        SpawnAlarmItems();
+        UpdateAlarmDisplay();
     }
 
     private void OnDestroy()
     {
+        // Unsubscribe from MasterAlarm
+        if (masterAlarm != null)
+        {
+            masterAlarm.OnAlarmsReceived -= OnAlarmsReceived;
+        }
+
         // Clean up button listener
         if (alarmPanelButton != null)
         {

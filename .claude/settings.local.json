@@ -1,10 +1,37 @@
 {
   "permissions": {
     "allow": [
-      "Read(//y/ALEC DIC DT - V1/Assets/Scripts/UI/**)",
-      "Bash(git add:*)"
+      "Bash(powershell -c \"(New-Object Media.SoundPlayer ''Y:\\Notification\\mixkit-correct-answer-tone-2870.wav'').PlaySync();\")"
     ],
     "deny": [],
     "ask": []
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "powershell -c (New-Object Media.SoundPlayer 'Y:\\Notification\\mixkit-correct-answer-tone-2870.wav').PlaySync();"
+      }
+    ],
+    "Notification": [
+      {
+        "type": "command",
+        "command": "powershell -c (New-Object Media.SoundPlayer 'Y:\\Notification\\mixkit-correct-answer-tone-2870.wav').PlaySync();"
+      }
+    ],
+    "TaskComplete": [
+      {
+        "type": "command",
+        "command": "powershell -c (New-Object Media.SoundPlayer 'Y:\\Notification\\mixkit-correct-answer-tone-2870.wav').PlaySync();"
+      }
+    ],
+    "PostToolUse": {
+      ".*": [
+        {
+          "type": "command",
+          "command": "powershell -c (New-Object Media.SoundPlayer 'Y:\\Notification\\mixkit-correct-answer-tone-2870.wav').PlaySync();"
+        }
+      ]
+    }
   }
 }
