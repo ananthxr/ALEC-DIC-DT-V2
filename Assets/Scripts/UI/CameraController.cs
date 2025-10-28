@@ -52,23 +52,27 @@ public class CameraController : MonoBehaviour
 
     void Update()
     {
-        HandleInput();
-
-        // Smooth interpolation to target values
-        Vector3 currentPos = controlledCamera.transform.position;
-        Quaternion currentRot = controlledCamera.transform.rotation;
-
-        float posDistance = Vector3.Distance(currentPos, targetPosition);
-        float rotDistance = Quaternion.Angle(currentRot, targetRotation);
-
-        // Only interpolate if there's a meaningful difference
-        if (posDistance > 0.001f || rotDistance > 0.01f)
+        // Only handle manual input when NOT transitioning
+        if (!isTransitioning)
         {
-            controlledCamera.transform.position = Vector3.Lerp(
-                currentPos, targetPosition, Time.deltaTime * moveSmooth);
+            HandleInput();
 
-            controlledCamera.transform.rotation = Quaternion.Slerp(
-                currentRot, targetRotation, Time.deltaTime * rotateSmooth);
+            // Smooth interpolation to target values (only for manual control)
+            Vector3 currentPos = controlledCamera.transform.position;
+            Quaternion currentRot = controlledCamera.transform.rotation;
+
+            float posDistance = Vector3.Distance(currentPos, targetPosition);
+            float rotDistance = Quaternion.Angle(currentRot, targetRotation);
+
+            // Only interpolate if there's a meaningful difference
+            if (posDistance > 0.001f || rotDistance > 0.01f)
+            {
+                controlledCamera.transform.position = Vector3.Lerp(
+                    currentPos, targetPosition, Time.deltaTime * moveSmooth);
+
+                controlledCamera.transform.rotation = Quaternion.Slerp(
+                    currentRot, targetRotation, Time.deltaTime * rotateSmooth);
+            }
         }
 
         // Update tracking values
@@ -94,11 +98,9 @@ public class CameraController : MonoBehaviour
             lastCameraPosition = controlledCamera.transform.position;
             lastCameraRotation = controlledCamera.transform.rotation;
 
-            Debug.Log($"[CameraController] Pan limits set: X({panLimitMinX} to {panLimitMaxX}), Z({panLimitMinZ} to {panLimitMaxZ})");
         }
 
         SetupBackNavigationButton();
-        Debug.Log("[CameraController] Camera controller initialized");
     }
 
     private void SetupBackNavigationButton()
@@ -107,22 +109,30 @@ public class CameraController : MonoBehaviour
         {
             backNavigationButton.onClick.AddListener(OnBackButtonClicked);
             backNavigationButton.gameObject.SetActive(true);
-            Debug.Log("[CameraController] Back navigation button setup complete");
         }
     }
 
     private void OnBackButtonClicked()
     {
-        Debug.Log("[CameraController] Back button clicked - resetting camera to default");
         ForceResetCameraStates();
-        ResetToDefault();
+
+        // Notify FloorTransitionManager to reset floors (if exists)
+        FloorTransitionManager floorTransitionManager = FindObjectOfType<FloorTransitionManager>();
+        if (floorTransitionManager != null)
+        {
+            floorTransitionManager.ResetToNoneState();
+        }
+        else
+        {
+            // If no floor transition manager, just reset camera
+            ResetToDefault();
+        }
     }
 
     private void ForceResetCameraStates()
     {
         isPanning = false;
         isRotating = false;
-        Debug.Log("[CameraController] Camera states force reset");
     }
 
     private void HandleInput()
@@ -176,10 +186,18 @@ public class CameraController : MonoBehaviour
 
             if (mouseDelta.magnitude > 0.1f) // Tiny threshold to prevent micro-jitter
             {
-                // Transform mouse movement to world space
-                Vector3 worldDelta = controlledCamera.transform.TransformDirection(-mouseDelta.x, 0, -mouseDelta.y);
-                worldDelta.y = 0; // Keep on ground plane
-                worldDelta *= panSpeed * 0.01f;
+                // Get camera's right and forward vectors projected onto XZ plane
+                Vector3 cameraRight = controlledCamera.transform.right;
+                Vector3 cameraForward = controlledCamera.transform.forward;
+
+                // Project onto XZ plane (remove Y component)
+                cameraRight.y = 0;
+                cameraForward.y = 0;
+                cameraRight.Normalize();
+                cameraForward.Normalize();
+
+                // Calculate world space delta using projected camera axes
+                Vector3 worldDelta = (-cameraRight * mouseDelta.x + -cameraForward * mouseDelta.y) * panSpeed * 0.01f;
 
                 Vector3 newTargetPosition = targetPosition + worldDelta;
 
@@ -192,7 +210,6 @@ public class CameraController : MonoBehaviour
         else if (isPanning && !useFreeExplorationMode)
         {
             // Panning disabled in constrained mode
-            Debug.Log("[CameraController] Panning disabled in constrained mode");
             lastMousePosition = Input.mousePosition;
         }
 
@@ -231,8 +248,6 @@ public class CameraController : MonoBehaviour
                     // Update targets
                     targetPosition = newCameraPosition;
                     targetRotation = Quaternion.LookRotation(temporaryOrbitPoint - newCameraPosition);
-
-                    Debug.Log($"[CameraController] Free mode - Orbiting around temporary point at: {temporaryOrbitPoint}");
                 }
                 else
                 {
@@ -260,8 +275,6 @@ public class CameraController : MonoBehaviour
                         // Update target position and rotation
                         targetPosition = targetPoint + dirToCamera * currentDistance;
                         targetRotation = Quaternion.LookRotation(targetPoint - targetPosition);
-
-                        Debug.Log($"[CameraController] Constrained mode - Orbiting around fixed target at: {targetPoint}");
                     }
                     else
                     {
@@ -277,8 +290,6 @@ public class CameraController : MonoBehaviour
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (Mathf.Abs(scroll) > 0.01f)
         {
-            Debug.Log($"[CameraController] Scroll detected: {scroll}");
-
             // Always zoom along camera's forward direction (where it's looking)
             Vector3 currentPos = controlledCamera.transform.position;
             Vector3 forwardDirection = controlledCamera.transform.forward;
@@ -298,13 +309,12 @@ public class CameraController : MonoBehaviour
                 float currentDistance = Vector3.Distance(currentPos, targetPoint);
                 float newDistance = Vector3.Distance(newCameraPosition, targetPoint);
 
-                Debug.Log($"[CameraController] Current distance: {currentDistance:F2}, New distance: {newDistance:F2}, Limits: {minZoomDistance}-{maxZoomDistance}");
+                
 
                 // Enforce distance limits from orbit target
                 if (newDistance < minZoomDistance || newDistance > maxZoomDistance)
                 {
                     canZoom = false;
-                    Debug.Log($"[CameraController] Zoom blocked: Distance {newDistance:F2} outside limits");
                 }
             }
             else
@@ -323,16 +333,6 @@ public class CameraController : MonoBehaviour
                 targetRotation = controlledCamera.transform.rotation;
                 lastCameraPosition = controlledCamera.transform.position;
                 lastCameraRotation = controlledCamera.transform.rotation;
-
-                if (cameraTarget != null)
-                {
-                    float finalDistance = Vector3.Distance(controlledCamera.transform.position, cameraTarget.position);
-                    Debug.Log($"[CameraController] Zoom applied: Distance to target: {finalDistance:F2}");
-                }
-                else
-                {
-                    Debug.Log($"[CameraController] Free zoom applied");
-                }
             }
         }
     }
@@ -364,8 +364,6 @@ public class CameraController : MonoBehaviour
 
         lastCameraPosition = defaultCameraPosition.position;
         lastCameraRotation = defaultCameraPosition.rotation;
-
-        Debug.Log("[CameraController] Camera reset to default position");
     }
 
     private void OnDestroy()
@@ -381,19 +379,10 @@ public class CameraController : MonoBehaviour
     {
         useFreeExplorationMode = freeExploration;
 
-        if (freeExploration)
+        // Warn if no camera target is assigned in constrained mode
+        if (!freeExploration && cameraTarget == null)
         {
-            Debug.Log("[CameraController] Switched to FREE EXPLORATION mode (temporary orbit + panning enabled)");
-        }
-        else
-        {
-            Debug.Log("[CameraController] Switched to CONSTRAINED mode (fixed orbit + no panning)");
-
-            // Warn if no camera target is assigned
-            if (cameraTarget == null)
-            {
-                Debug.LogWarning("[CameraController] Camera target not assigned - constrained mode may not work properly!");
-            }
+            Debug.LogWarning("[CameraController] Camera target not assigned - constrained mode may not work properly!");
         }
     }
 
@@ -401,6 +390,67 @@ public class CameraController : MonoBehaviour
     public bool IsFreeExplorationMode()
     {
         return useFreeExplorationMode;
+    }
+
+    // Floor Transition Manager Integration
+    private bool isTransitioning = false;
+    public bool IsTransitioning => isTransitioning;
+
+    public void PrepareForFloorTransition()
+    {
+        MoveToPositionSmooth(defaultCameraPosition, 1.0f, null);
+    }
+
+    public void MoveToPositionSmooth(Transform targetTransform, float duration, System.Action onComplete)
+    {
+        if (targetTransform == null)
+        {
+            Debug.LogWarning("[CameraController] Target transform is null!");
+            return;
+        }
+
+        StartCoroutine(MoveToPositionCoroutine(targetTransform, duration, onComplete));
+    }
+
+    private System.Collections.IEnumerator MoveToPositionCoroutine(Transform targetTransform, float duration, System.Action onComplete)
+    {
+        isTransitioning = true;
+
+        Vector3 startPosition = controlledCamera.transform.position;
+        Quaternion startRotation = controlledCamera.transform.rotation;
+        Vector3 endPosition = targetTransform.position;
+        Quaternion endRotation = targetTransform.rotation;
+
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+
+            // Smooth interpolation
+            float smoothT = Mathf.SmoothStep(0f, 1f, t);
+
+            // Update camera position and rotation
+            controlledCamera.transform.position = Vector3.Lerp(startPosition, endPosition, smoothT);
+            controlledCamera.transform.rotation = Quaternion.Slerp(startRotation, endRotation, smoothT);
+
+            // Update target values to prevent Update() from interfering
+            targetPosition = controlledCamera.transform.position;
+            targetRotation = controlledCamera.transform.rotation;
+
+            yield return null;
+        }
+
+        // Ensure we reach exact target
+        controlledCamera.transform.position = endPosition;
+        controlledCamera.transform.rotation = endRotation;
+        targetPosition = endPosition;
+        targetRotation = endRotation;
+
+        isTransitioning = false;
+
+        onComplete?.Invoke();
     }
 
     private void OnDrawGizmos()

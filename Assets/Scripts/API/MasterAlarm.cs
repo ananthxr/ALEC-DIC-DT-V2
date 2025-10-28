@@ -238,6 +238,15 @@ public class MasterAlarm : MonoBehaviour
     // Store consistent floor assignments per alarm ID
     private Dictionary<string, int> alarmFloorMap = new Dictionary<string, int>();
 
+    // Current status filter (for dynamic filtering)
+    private List<string> currentStatusFilter = new List<string>();
+
+    // Current severity filter (for dynamic filtering)
+    private List<string> currentSeverityFilter = new List<string>();
+
+    // Current floor entity ID filter (for floor-based alarm filtering)
+    private string currentFloorEntityId = "54549790-77e9-11ef-8f9b-033ad0625bc8"; // Default to root building
+
     // Callback to send alarm data to AlarmsManager
     public System.Action<List<AlarmData>> OnAlarmsReceived;
 
@@ -458,11 +467,8 @@ public class MasterAlarm : MonoBehaviour
 
         foreach (AlarmItem apiAlarm in apiAlarms)
         {
-            // Filter out cleared alarms
-            if (apiAlarm.cleared)
-            {
-                continue;
-            }
+            // NOTE: Do NOT filter out cleared alarms here - let the server-side filter handle it
+            // The user may want to see cleared alarms based on their filter selection
 
             // Convert Unix timestamp (milliseconds) to readable format
             DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(apiAlarm.createdTime).LocalDateTime;
@@ -488,7 +494,7 @@ public class MasterAlarm : MonoBehaviour
             {
                 location = apiAlarm.originatorName,
                 deviceName = apiAlarm.originatorLabel,
-                isActive = !apiAlarm.cleared,
+                isActive = !apiAlarm.cleared,      // Set based on cleared flag
                 floorIndex = floorIndex
             };
 
@@ -551,6 +557,75 @@ public class MasterAlarm : MonoBehaviour
         alarmFloorMap[alarmId] = floorIndex;
 
         return floorIndex;
+    }
+
+    // ============ Public Filter Update Methods ============
+
+    /// <summary>
+    /// Updates the floor entity filter and resubscribes to WebSocket with new entity ID
+    /// Called by FloorTransitionManager when floor selection changes
+    /// </summary>
+    public void UpdateFloorEntityFilter(string entityId)
+    {
+        if (!isWebSocketConnected || webSocket == null)
+        {
+            Debug.LogWarning("[MasterAlarm] Cannot update floor filter - WebSocket not connected");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(entityId))
+        {
+            Debug.LogWarning("[MasterAlarm] Entity ID is null or empty - ignoring update");
+            return;
+        }
+
+        Debug.Log($"[MasterAlarm] Updating floor entity filter to: {entityId}");
+
+        // Update current entity ID
+        currentFloorEntityId = entityId;
+
+        // Start coroutine to unsubscribe and resubscribe
+        StartCoroutine(ResubscribeWithNewFilters());
+    }
+
+    /// <summary>
+    /// Updates the status and severity filters and resubscribes to WebSocket with new filters
+    /// Called by AlarmFilterPanel when user clicks Update button
+    /// </summary>
+    public void UpdateFilters(List<string> statusList, List<string> severityList)
+    {
+        if (!isWebSocketConnected || webSocket == null)
+        {
+            Debug.LogWarning("[MasterAlarm] Cannot update filters - WebSocket not connected");
+            return;
+        }
+
+        Debug.Log($"[MasterAlarm] Updating status filter to: [{string.Join(", ", statusList)}]");
+        Debug.Log($"[MasterAlarm] Updating severity filter to: [{string.Join(", ", severityList)}]");
+
+        // Update current filters
+        currentStatusFilter = new List<string>(statusList);
+        currentSeverityFilter = new List<string>(severityList);
+
+        // Start coroutine to unsubscribe and resubscribe
+        StartCoroutine(ResubscribeWithNewFilters());
+    }
+
+    private IEnumerator ResubscribeWithNewFilters()
+    {
+        // Step 1: Unsubscribe from current alarm subscription
+        Debug.Log("[MasterAlarm] Step 1: Unsubscribing from current alarm data...");
+        SendAlarmUnsubscribe();
+
+        // No wait needed - let the floor transition animation provide natural breathing room
+        // The server processes unsubscribe/subscribe asynchronously, and the floor animation
+        // gives plenty of time for the subscription to update smoothly
+
+        // Step 2: Resubscribe with new filters immediately
+        Debug.Log("[MasterAlarm] Step 2: Resubscribing with new filters (floor transition provides natural delay)...");
+        SendAlarmSubscription();
+
+        yield break;
     }
 
     // ============ WebSocket Methods ============
@@ -658,10 +733,66 @@ public class MasterAlarm : MonoBehaviour
         }
     }
 
+    private string BuildStatusListJson()
+    {
+        // If no filter is set, return empty array (show all statuses)
+        if (currentStatusFilter == null || currentStatusFilter.Count == 0)
+        {
+            return "[]";
+        }
+
+        // Build JSON array string from current status filter
+        StringBuilder sb = new StringBuilder();
+        sb.Append("[");
+        for (int i = 0; i < currentStatusFilter.Count; i++)
+        {
+            sb.Append("\"");
+            sb.Append(currentStatusFilter[i]);
+            sb.Append("\"");
+            if (i < currentStatusFilter.Count - 1)
+            {
+                sb.Append(", ");
+            }
+        }
+        sb.Append("]");
+
+        return sb.ToString();
+    }
+
+    private string BuildSeverityListJson()
+    {
+        // If no filter is set, return empty array (show all severities)
+        if (currentSeverityFilter == null || currentSeverityFilter.Count == 0)
+        {
+            return "[]";
+        }
+
+        // Build JSON array string from current severity filter
+        StringBuilder sb = new StringBuilder();
+        sb.Append("[");
+        for (int i = 0; i < currentSeverityFilter.Count; i++)
+        {
+            sb.Append("\"");
+            sb.Append(currentSeverityFilter[i]);
+            sb.Append("\"");
+            if (i < currentSeverityFilter.Count - 1)
+            {
+                sb.Append(", ");
+            }
+        }
+        sb.Append("]");
+
+        return sb.ToString();
+    }
+
     private async void SendAlarmSubscription()
     {
         try
         {
+            // Build filter JSON strings
+            string statusListJson = BuildStatusListJson();
+            string severityListJson = BuildSeverityListJson();
+
             // Use raw JSON string matching EXACT web format
             string jsonCommand = @"{
                 ""cmds"": [{
@@ -678,7 +809,7 @@ public class MasterAlarm : MonoBehaviour
                             },
                             ""rootEntity"": {
                                 ""entityType"": ""ASSET"",
-                                ""id"": ""54549790-77e9-11ef-8f9b-033ad0625bc8""
+                                ""id"": """ + currentFloorEntityId + @"""
                             },
                             ""direction"": ""FROM"",
                             ""maxLevel"": 5,
@@ -691,8 +822,8 @@ public class MasterAlarm : MonoBehaviour
                             ""pageSize"": " + wsPageSize + @",
                             ""textSearch"": null,
                             ""typeList"": null,
-                            ""severityList"": [],
-                            ""statusList"": [],
+                            ""severityList"": " + severityListJson + @",
+                            ""statusList"": " + statusListJson + @",
                             ""searchPropagatedAlarms"": true,
                             ""assigneeId"": null,
                             ""sortOrder"": {
@@ -721,6 +852,9 @@ public class MasterAlarm : MonoBehaviour
 
             if (webSocket != null && webSocket.State == WebSocketState.Open)
             {
+                // Debug: Print the exact WebSocket message being sent
+                Debug.Log($"[MasterAlarm] 📤 WebSocket Message Being Sent:\n{jsonCommand}");
+
                 await webSocket.SendText(jsonCommand);
                 Debug.Log("[MasterAlarm] ► Alarm subscription sent (cmdId: 2) - waiting for server push updates...");
             }

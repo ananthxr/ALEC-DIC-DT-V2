@@ -7,6 +7,13 @@ public class MasterUI : MonoBehaviour
     [Header("UI Element Tracking")]
     [SerializeField] private bool debugMode = true;
 
+    [Header("Manager References")]
+    [SerializeField] private FloorTransitionManager floorTransitionManager;
+    [SerializeField] private CameraController cameraController;
+
+    [Header("Ground Plane Reference")]
+    [SerializeField] private GameObject groundPlane; // Reference to ground plane (optional - FloorTransitionManager handles it)
+
     // Dictionary to track UI element states by name
     private Dictionary<string, UIElementState> uiElementStates = new Dictionary<string, UIElementState>();
 
@@ -14,9 +21,48 @@ public class MasterUI : MonoBehaviour
     public event Action<string, bool> OnUIElementVisibilityChanged;
     public event Action<string, UIElementState> OnUIElementStateChanged;
 
+    // Singleton instance for easy access
+    private static MasterUI instance;
+    public static MasterUI Instance => instance;
+
     private void Awake()
     {
-        Debug.Log("[MasterUI] Master UI tracker initialized");
+        // Singleton pattern
+        if (instance == null)
+        {
+            instance = this;
+        }
+        else
+        {
+            Debug.LogWarning("[MasterUI] Multiple MasterUI instances detected! Destroying duplicate.");
+            Destroy(gameObject);
+            return;
+        }
+
+        Debug.Log("[MasterUI] Master UI controller initialized");
+        AutoFindManagers();
+    }
+
+    private void AutoFindManagers()
+    {
+        // Auto-find managers if not assigned
+        if (floorTransitionManager == null)
+        {
+            floorTransitionManager = FindObjectOfType<FloorTransitionManager>();
+            if (floorTransitionManager != null)
+            {
+                Debug.Log("[MasterUI] Auto-found FloorTransitionManager");
+            }
+        }
+
+        if (cameraController == null)
+        {
+            cameraController = FindObjectOfType<CameraController>();
+            if (cameraController != null)
+            {
+                Debug.Log("[MasterUI] Auto-found CameraController");
+            }
+        }
     }
 
     // Called by SlidingPanelController when panel state changes
@@ -138,6 +184,118 @@ public class MasterUI : MonoBehaviour
         uiElementStates.Clear();
         Debug.Log("[MasterUI] All UI states cleared");
     }
+
+    // === MASTER CONTROL METHODS ===
+
+    /// <summary>
+    /// Master method to reset entire UI system to default state
+    /// </summary>
+    public void ResetToDefaultState()
+    {
+        Debug.Log("[MasterUI] 🔄 Resetting entire UI system to default state");
+
+        // Reset floor transitions (this will also show the ground plane)
+        if (floorTransitionManager != null)
+        {
+            floorTransitionManager.ResetToNoneState();
+        }
+
+        // Camera will be reset by FloorTransitionManager
+        // Clear UI states
+        ClearAllStates();
+
+        Debug.Log("[MasterUI] ✅ UI system reset complete");
+        Debug.Log("[MasterUI] Note: Ground plane visibility is managed by FloorTransitionManager");
+    }
+
+    /// <summary>
+    /// Master method to select a floor with full coordination
+    /// NOTE: Floor buttons now directly trigger FloorTransitionManager via button references in FloorData
+    /// This method can still be called programmatically if needed
+    /// </summary>
+    public void SelectFloor(int floorIndex)
+    {
+        Debug.Log($"[MasterUI] Master command: Select floor {floorIndex}");
+        Debug.Log($"[MasterUI] Note: Floor buttons are now wired directly to FloorTransitionManager.OnFloorButtonClicked()");
+
+        if (floorTransitionManager != null)
+        {
+            floorTransitionManager.SelectFloor(floorIndex);
+            UpdateUIElementState($"Floor{floorIndex}", true, $"Master selected floor {floorIndex}");
+        }
+        else
+        {
+            Debug.LogError("[MasterUI] Cannot select floor - FloorTransitionManager not found!");
+        }
+    }
+
+    /// <summary>
+    /// Get current floor state from FloorTransitionManager
+    /// </summary>
+    public FloorState GetCurrentFloorState()
+    {
+        if (floorTransitionManager != null)
+        {
+            return floorTransitionManager.CurrentState;
+        }
+        return FloorState.None;
+    }
+
+    /// <summary>
+    /// Get current camera view state from FloorTransitionManager
+    /// </summary>
+    public CameraViewState GetCurrentCameraView()
+    {
+        if (floorTransitionManager != null)
+        {
+            return floorTransitionManager.CurrentCameraView;
+        }
+        return CameraViewState.Default;
+    }
+
+    /// <summary>
+    /// Check if any transition is currently happening
+    /// </summary>
+    public bool IsSystemTransitioning()
+    {
+        bool floorTransitioning = floorTransitionManager != null && floorTransitionManager.IsTransitioning;
+        bool cameraTransitioning = cameraController != null && cameraController.IsTransitioning;
+
+        return floorTransitioning || cameraTransitioning;
+    }
+
+    /// <summary>
+    /// Check if ground plane is currently visible
+    /// </summary>
+    public bool IsGroundPlaneVisible()
+    {
+        if (groundPlane != null)
+        {
+            return groundPlane.activeSelf;
+        }
+        Debug.LogWarning("[MasterUI] Ground plane reference not assigned");
+        return false;
+    }
+
+    /// <summary>
+    /// Get system status summary for debugging
+    /// </summary>
+    [ContextMenu("Print System Status")]
+    public void PrintSystemStatus()
+    {
+        Debug.Log("=== MASTER UI SYSTEM STATUS ===");
+        Debug.Log($"Floor State: {GetCurrentFloorState()}");
+        Debug.Log($"Camera View: {GetCurrentCameraView()}");
+        Debug.Log($"Is Transitioning: {IsSystemTransitioning()}");
+        Debug.Log($"Ground Plane Visible: {IsGroundPlaneVisible()}");
+        Debug.Log($"UI Elements Tracked: {uiElementStates.Count}");
+        Debug.Log("================================");
+    }
+
+    // Public accessors for managers
+    public FloorTransitionManager FloorTransitionManager => floorTransitionManager;
+    public CameraController CameraController => cameraController;
+    public GameObject GroundPlane => groundPlane;
 }
 
 // Data structure to hold UI element state information

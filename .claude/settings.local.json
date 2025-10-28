@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -c \"(New-Object Media.SoundPlayer ''Y:\\Notification\\mixkit-correct-answer-tone-2870.wav'').PlaySync();\")"
+      "Read(//y/ALEC DIC DT - V1/Assets/Scripts/UI/FloorSelection/**)"
     ],
     "deny": [],
     "ask": []

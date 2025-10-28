@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
+using System.Collections;
 using System.Collections.Generic;
 
 public class SlidingPanelController : MonoBehaviour
@@ -177,7 +178,7 @@ public class SlidingPanelController : MonoBehaviour
         }
     }
 
-    // Update alarm display with real data
+    // Update alarm display with real data (smoothly over time)
     private void UpdateAlarmDisplay()
     {
         if (alarmItemPrefab == null || scrollViewContent == null)
@@ -186,33 +187,96 @@ public class SlidingPanelController : MonoBehaviour
             return;
         }
 
-        // Clear existing items
-        ClearAlarmItems();
-
-        // Spawn items based on actual alarm data
-        int alarmsToDisplay = Mathf.Min(currentAlarmData.Count, numberOfItemsToSpawn);
-
-        for (int i = 0; i < alarmsToDisplay; i++)
-        {
-            GameObject item = Instantiate(alarmItemPrefab, scrollViewContent, false);
-            spawnedItems.Add(item);
-
-            // Get the AlarmItemUI component and set the data
-            AlarmItemUI alarmUI = item.GetComponent<AlarmItemUI>();
-            if (alarmUI != null)
-            {
-                alarmUI.SetAlarmData(currentAlarmData[i]);
-            }
-            else
-            {
-                Debug.LogWarning($"[SlidingPanelController] AlarmItemUI component not found on prefab instance {i}");
-            }
-        }
-
-        Debug.Log($"[SlidingPanelController] Displayed {alarmsToDisplay} alarm items with real data");
+        // Use coroutine for smooth, gradual update to avoid frame spikes
+        StartCoroutine(UpdateAlarmDisplaySmooth());
     }
 
-    // Clear all spawned items
+    private IEnumerator UpdateAlarmDisplaySmooth()
+    {
+        // Step 1: Clear existing items gradually (batch by batch to avoid jitter)
+        yield return StartCoroutine(ClearAlarmItemsSmooth());
+
+        // Display ALL alarms (remove the limit if you want to show all filtered results)
+        int alarmsToDisplay = currentAlarmData.Count;
+
+        if (alarmsToDisplay == 0)
+        {
+            Debug.Log("[SlidingPanelController] No alarms to display (filtered result is empty)");
+            yield break;
+        }
+
+        // Step 2: Spawn alarm item prefabs gradually (batch by batch)
+        int batchSize = 1; // Create 3 items per frame for smooth performance
+        float delayBetweenBatches = 0.05f; // Small delay between batches for buttery smoothness
+
+        for (int i = 0; i < alarmsToDisplay; i += batchSize)
+        {
+            int itemsInThisBatch = Mathf.Min(batchSize, alarmsToDisplay - i);
+
+            // Create a batch of items
+            for (int j = 0; j < itemsInThisBatch; j++)
+            {
+                int index = i + j;
+                GameObject item = Instantiate(alarmItemPrefab, scrollViewContent, false);
+                spawnedItems.Add(item);
+
+                // Get the AlarmItemUI component and set the data
+                AlarmItemUI alarmUI = item.GetComponent<AlarmItemUI>();
+                if (alarmUI != null)
+                {
+                    alarmUI.SetAlarmData(currentAlarmData[index]);
+                }
+                else
+                {
+                    Debug.LogWarning($"[SlidingPanelController] AlarmItemUI component not found on prefab instance {index}");
+                }
+            }
+
+            // Wait before processing next batch
+            yield return new WaitForSeconds(delayBetweenBatches);
+        }
+
+        // Step 3: Force rebuild the layout to ensure proper scroll view content size
+        UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(scrollViewContent);
+
+        // Reset scroll position to top
+        if (scrollRect != null)
+        {
+            scrollRect.verticalNormalizedPosition = 1f;
+        }
+
+        Debug.Log($"[SlidingPanelController] ✓ Displayed {alarmsToDisplay} alarm items smoothly (batched over time)");
+    }
+
+    // Clear all spawned items gradually (batch by batch to avoid frame spike)
+    private IEnumerator ClearAlarmItemsSmooth()
+    {
+        int batchSize = 1; // Destroy 5 items per frame
+        float delayBetweenBatches = 0.03f; // Small delay between destruction batches
+
+        for (int i = 0; i < spawnedItems.Count; i += batchSize)
+        {
+            int itemsInThisBatch = Mathf.Min(batchSize, spawnedItems.Count - i);
+
+            // Destroy a batch of items
+            for (int j = 0; j < itemsInThisBatch; j++)
+            {
+                int index = i + j;
+                if (spawnedItems[index] != null)
+                {
+                    Destroy(spawnedItems[index]);
+                }
+            }
+
+            // Wait before destroying next batch
+            yield return new WaitForSeconds(delayBetweenBatches);
+        }
+
+        spawnedItems.Clear();
+        Debug.Log("[SlidingPanelController] ✓ Cleared all alarm items smoothly (batched destruction)");
+    }
+
+    // Clear all spawned items immediately (fallback for instant cleanup)
     private void ClearAlarmItems()
     {
         foreach (GameObject item in spawnedItems)

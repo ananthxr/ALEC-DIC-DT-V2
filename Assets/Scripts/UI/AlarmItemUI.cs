@@ -114,8 +114,6 @@ public class AlarmItemUI : MonoBehaviour
         {
             timeText.text = alarmData.timestamp;
         }
-
-        Debug.Log($"[AlarmItemUI] Set alarm data: {alarmData.description} - {alarmData.severity}");
     }
 
     public void ClearData()
